@@ -12,6 +12,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.request
+from desktop_process import DesktopProcess
 
 if os.name != 'nt':
     raise SystemExit('This test requires native Windows, not Wine.')
@@ -25,20 +26,12 @@ class Fixture(BaseHTTPRequestHandler):
         try: self.wfile.write(PAYLOAD)
         except (BrokenPipeError, ConnectionResetError): pass
 
-def wait(condition, message):
-    for _ in range(400):
-        try:
-            result=condition()
-            if result: return result
-        except (OSError, ValueError): pass
-        time.sleep(.05)
-    raise AssertionError(message)
-
 user32=ctypes.WinDLL('user32',use_last_error=True)
 callback_type=ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)
 user32.EnumWindows.argtypes=[callback_type,wintypes.LPARAM]
 user32.GetWindowThreadProcessId.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.DWORD)]
 user32.IsWindowVisible.argtypes=[wintypes.HWND]
+user32.GetWindowTextW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
 user32.PostMessageW.argtypes=[wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM]
 
 def find_window(pid):
@@ -47,7 +40,9 @@ def find_window(pid):
     def callback(hwnd,_):
         process_id=wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd,ctypes.byref(process_id))
-        if process_id.value==pid and user32.IsWindowVisible(hwnd): windows.append(hwnd)
+        title=ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(hwnd,title,len(title))
+        if process_id.value==pid and user32.IsWindowVisible(hwnd) and title.value=='OpenDownload': windows.append(hwnd)
         return True
     user32.EnumWindows(callback,0)
     return windows[0] if windows else None
@@ -59,27 +54,31 @@ with tempfile.TemporaryDirectory(prefix='opendownload-windows-') as directory:
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     command=[str(Path('target/release/opendownload.exe').resolve()),'--port',str(port),'--downloads',str(root/'files'),'--state',str(root/'queue.json')]
-    process=subprocess.Popen(command)
+    desktop=DesktopProcess(command,root,port)
+    process=desktop.start()
     try:
-        hwnd=wait(lambda:find_window(process.pid),'Native Windows window did not appear')
+        token=desktop.ready()
+        hwnd=desktop.wait(lambda:find_window(process.pid),'Native Windows window did not appear')
         base=f'http://127.0.0.1:{port}'
-        page=urllib.request.urlopen(base).read().decode()
-        token=re.search("const token='([^']+)'",page)[1]
         request=urllib.request.Request(base+'/api/add',data=json.dumps({'url':f'http://127.0.0.1:{fixture.server_port}/windows.bin'}).encode(),headers={'X-Token':token,'Content-Type':'application/json'})
         assert json.load(urllib.request.urlopen(request))['ok']
         def completed():
             return (root/'files/windows.bin').exists() and list(json.loads((root/'queue.json').read_text()).values())[0]['status']=='completed'
-        wait(completed,'Windows desktop engine transfer failed')
+        desktop.wait(completed,'Windows desktop engine transfer failed')
         assert (root/'files/windows.bin').read_bytes()==PAYLOAD
         user32.PostMessageW(hwnd,0x0010,0,0)  # WM_CLOSE: normal native close.
         assert process.wait(timeout=15)==0
         assert (root/'queue.bridge-key').read_text()==token
-        process=subprocess.Popen(command)
-        hwnd=wait(lambda:find_window(process.pid),'Windows window restart failed')
+        process=desktop.start()
+        assert desktop.ready()==token
+        hwnd=desktop.wait(lambda:find_window(process.pid),'Windows window restart failed')
         assert completed()
         user32.PostMessageW(hwnd,0x0010,0,0)
         assert process.wait(timeout=15)==0
         print('PASS: native Windows window, desktop-engine file integrity, graceful close, queue restoration, and persistent pairing.')
+    except Exception as error:
+        desktop.report_failure(error)
+        raise
     finally:
-        if process.poll() is None: process.terminate();process.wait(timeout=10)
+        desktop.stop()
         fixture.shutdown();fixture.server_close()

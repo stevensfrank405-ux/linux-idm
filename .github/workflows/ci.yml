@@ -3,6 +3,8 @@ on: [push, pull_request]
 jobs:
   linux:
     runs-on: ubuntu-22.04
+    env:
+      OPENDOWNLOAD_DIAGNOSTICS: test-results/desktop
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -12,16 +14,23 @@ jobs:
         with:
           python-version: '3.12'
       - name: Desktop test dependencies
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon0 libgl1-mesa-dri libegl1 libx11-6 libxcursor1 libxi6 libxrandr2 xvfb xdotool imagemagick
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libgl1-mesa-dri libegl1 libx11-6 libxcursor1 libxi6 libxrandr2 xvfb xdotool imagemagick
       - run: rustup show
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo build --release --locked
       - run: python -m unittest -v
+      - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - run: node tests/extension_protocol.mjs
       - run: CHROMIUM=google-chrome node tests/browser_smoke.mjs
       - name: Native desktop smoke test
         run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python tests/desktop_smoke.py
+      - name: Upload desktop diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Desktop-diagnostics-Linux
+          path: test-results/desktop/
       - run: python scripts/package_desktop.py --platform linux
       - uses: actions/upload-artifact@v4
         with:
@@ -34,6 +43,7 @@ jobs:
     runs-on: windows-latest
     env:
       RUSTFLAGS: -C target-feature=+crt-static
+      OPENDOWNLOAD_DIAGNOSTICS: test-results/desktop
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,8 +56,15 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo build --release --locked
       - run: python -m unittest -v
+      - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - run: node tests/extension_protocol.mjs
       - run: python tests/desktop_windows_smoke.py
+      - name: Upload desktop diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Desktop-diagnostics-Windows
+          path: test-results/desktop/
       - name: Install NSIS
         run: choco install nsis -y --no-progress
       - name: Package desktop and browser companion

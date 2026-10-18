@@ -75,7 +75,7 @@ else:
         import re
         versions = re.findall(r'GLIBC_([0-9.]+)', subprocess.check_output(['objdump', '-T', str(binary)], text=True))
         glibc = max(versions, key=lambda v: tuple(map(int, v.split('.')))) if versions else '2.35'
-        (deb / 'DEBIAN/control').write_text(f'Package: opendownload\nVersion: {version}\nArchitecture: {arch}\nMaintainer: OpenDownload contributors\nSection: net\nPriority: optional\nDepends: libc6 (>= {glibc}), libgcc-s1, libx11-6, libxcursor1, libxi6, libxrandr2, libxkbcommon0, libgl1, libegl1\nDescription: Free native desktop download manager with browser integration\n')
+        (deb / 'DEBIAN/control').write_text(f'Package: opendownload\nVersion: {version}\nArchitecture: {arch}\nMaintainer: OpenDownload contributors\nSection: net\nPriority: optional\nDepends: libc6 (>= {glibc}), libgcc-s1, libx11-6, libxcursor1, libxi6, libxrandr2, libxkbcommon0, libxkbcommon-x11-0, libgl1, libegl1\nDescription: Free native desktop download manager with browser integration\n')
         shutil.copy2(stage / name, deb / 'usr/bin/opendownload')
         shutil.copy2(stage / 'opendownload.desktop', deb / 'usr/share/applications')
         shutil.copy2(stage / 'opendownload.svg', deb / 'usr/share/icons/hicolor/scalable/apps')

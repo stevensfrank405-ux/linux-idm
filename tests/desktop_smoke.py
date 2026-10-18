@@ -11,6 +11,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.request
+from desktop_process import DesktopProcess
 
 PAYLOAD = bytes(range(256)) * 16384
 class Fixture(BaseHTTPRequestHandler):
@@ -24,13 +25,6 @@ class Fixture(BaseHTTPRequestHandler):
                 self.wfile.write(PAYLOAD[offset:offset+8192])
                 time.sleep(.003)
         except (BrokenPipeError, ConnectionResetError): pass
-
-def wait(condition, message):
-    for _ in range(400):
-        value = condition()
-        if value: return value
-        time.sleep(.03)
-    raise AssertionError(message)
 
 def xdo(*arguments):
     return subprocess.check_output(['xdotool', *map(str, arguments)], text=True).strip()
@@ -64,12 +58,14 @@ with tempfile.TemporaryDirectory(prefix='opendownload-native-') as directory:
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
     command = [str(Path(os.environ.get('OPENDOWNLOAD_BIN', 'target/release/opendownload')).resolve()), '--port', str(port), '--downloads', str(root/'files'), '--state', str(root/'queue.json')]
-    process = subprocess.Popen(command, stdout=subprocess.DEVNULL)
+    desktop = DesktopProcess(command, root, port)
+    process = desktop.start()
     try:
         def window():
             try: return xdo('search', '--onlyvisible', '--pid', process.pid, '--name', 'OpenDownload').splitlines()[0]
             except subprocess.CalledProcessError: return None
-        window_id = wait(window, 'Native window did not appear')
+        desktop.ready()
+        window_id = desktop.wait(window, 'Native window did not appear')
         xdo('windowfocus', '--sync', window_id)
         time.sleep(.3)
         xdo('key', 'ctrl+l')
@@ -78,8 +74,8 @@ with tempfile.TemporaryDirectory(prefix='opendownload-native-') as directory:
         def queue():
             try: return list(json.loads((root/'queue.json').read_text()).values())
             except (FileNotFoundError, json.JSONDecodeError): return []
-        wait(lambda: any(j['status']=='downloading' for j in queue()), 'Native add action did not start a transfer')
-        wait(lambda: any(j['status']=='completed' for j in queue()), 'Native transfer did not complete')
+        desktop.wait(lambda: any(j['status']=='downloading' for j in queue()), 'Native add action did not start a transfer')
+        desktop.wait(lambda: any(j['status']=='completed' for j in queue()), 'Native transfer did not complete')
         assert (root/'files/native-download.bin').read_bytes() == PAYLOAD
         # Both native dialogs must open without crashing or losing the engine.
         xdo('key', 'ctrl+b')
@@ -96,13 +92,17 @@ with tempfile.TemporaryDirectory(prefix='opendownload-native-') as directory:
         assert process.wait(timeout=10) == 0
         # The same native executable must reopen the queue and keep pairing stable.
         key = (root/'queue.bridge-key').read_text()
-        process = subprocess.Popen(command, stdout=subprocess.DEVNULL)
-        wait(window, 'Native restart failed')
+        process = desktop.start()
+        desktop.ready()
+        desktop.wait(window, 'Native restart failed')
         assert (root/'queue.bridge-key').read_text() == key
         assert queue()[0]['status'] == 'completed'
         close_window(window())
         assert process.wait(timeout=10) == 0
         print('PASS: native desktop window, keyboard URL entry, real file integrity, dialogs, graceful close, queue restore, and persistent browser pairing.')
+    except Exception as error:
+        desktop.report_failure(error)
+        raise
     finally:
-        if process.poll() is None: process.terminate();process.wait(timeout=5)
+        desktop.stop()
         fixture.shutdown();fixture.server_close()
