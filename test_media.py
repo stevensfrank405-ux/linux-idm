@@ -64,7 +64,8 @@ class Media(unittest.TestCase):
         metadata=json.loads(subprocess.check_output([str(tools/('ffprobe.exe' if os.name=='nt' else 'ffprobe')),'-v','error','-show_entries','stream=codec_type','-of','json',str(file)],text=True))
         self.assertEqual({s['codec_type'] for s in metadata['streams']},{'video','audio'})
         self.assertEqual(file.stat().st_size,self.job()['downloaded'])
-        self.assertFalse(list((self.root/'files').glob('.opendownload-*')))
+        # The completed file is committed before asynchronous temporary cleanup.
+        self.wait_for(lambda:not list((self.root/'files').glob('.opendownload-*')))
         return file
     def test_html_page_extracts_and_merges_audio_video(self):
         result=self.api('add',{'url':self.url+'/page'})
