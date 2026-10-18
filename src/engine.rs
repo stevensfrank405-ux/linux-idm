@@ -238,6 +238,7 @@ impl App {
                 let mut saved = Instant::now();
                 loop {
                     if self.data.lock().await.jobs[id].status != "downloading" {
+                        output.flush().await?;
                         return Ok(true);
                     }
                     let next = tokio::select! { next = stream.next() => next, _ = tokio::time::sleep(Duration::from_millis(100)) => continue };
@@ -376,6 +377,7 @@ impl App {
         let mut stream = response.bytes_stream();
         loop {
             if self.data.lock().await.jobs[id].status != "downloading" {
+                output.flush().await?;
                 return Ok(());
             }
             let chunk = tokio::select! { next = stream.next() => next, _ = tokio::time::sleep(Duration::from_millis(100)) => continue };
