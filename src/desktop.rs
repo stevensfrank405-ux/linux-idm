@@ -13,6 +13,12 @@ const GREEN: Color32 = Color32::from_rgb(139, 229, 187);
 
 pub(crate) fn options() -> eframe::NativeOptions {
     eframe::NativeOptions {
+        #[cfg(target_os = "windows")]
+        renderer: eframe::Renderer::Wgpu,
+        #[cfg(not(target_os = "windows"))]
+        renderer: eframe::Renderer::Glow,
+        #[cfg(target_os = "windows")]
+        wgpu_options: windows_gpu_options(),
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100., 740.])
             .with_min_inner_size([740., 520.])
@@ -21,6 +27,30 @@ pub(crate) fn options() -> eframe::NativeOptions {
         ..Default::default()
     }
 }
+// DirectX supports WARP software adapters on machines without OpenGL 2.0 drivers.
+#[cfg(target_os = "windows")]
+fn windows_gpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
+    let mut setup = WgpuSetupCreateNew::default();
+    setup.instance_descriptor.backends = wgpu::Backends::DX12;
+    if std::env::var("OPENDOWNLOAD_SOFTWARE_RENDERING").as_deref() == Ok("1") {
+        setup.native_adapter_selector = Some(Arc::new(|adapters, surface| {
+            adapters
+                .iter()
+                .find(|adapter| {
+                    adapter.get_info().device_type == wgpu::DeviceType::Cpu
+                        && surface.is_none_or(|surface| adapter.is_surface_supported(surface))
+                })
+                .cloned()
+                .ok_or_else(|| "No compatible DirectX software adapter is available".to_owned())
+        }));
+    }
+    WgpuConfiguration {
+        wgpu_setup: WgpuSetup::CreateNew(setup),
+        ..Default::default()
+    }
+}
+
 fn icon() -> egui::IconData {
     let mut rgba = vec![0; 64 * 64 * 4];
     for y in 0..64 {

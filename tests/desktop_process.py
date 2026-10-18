@@ -8,9 +8,9 @@ import time
 import urllib.request
 
 class DesktopProcess:
-    def __init__(self, command, root, port):
+    def __init__(self, command, root, port, *, use_environment=True):
         self.command, self.port = command, port
-        directory = Path(os.environ.get('OPENDOWNLOAD_DIAGNOSTICS', root))
+        directory = Path(os.environ.get('OPENDOWNLOAD_DIAGNOSTICS', root)) if use_environment else Path(root)
         directory.mkdir(parents=True, exist_ok=True)
         self.log_path = directory / ('windows-desktop.log' if os.name == 'nt' else 'linux-desktop.log')
         self.log = self.log_path.open('ab', buffering=0)

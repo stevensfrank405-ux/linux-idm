@@ -32,7 +32,7 @@ class Handler(BaseHTTPRequestHandler):
 HTTPServer(('127.0.0.1',{port}),Handler).serve_forever()
 '''
         with tempfile.TemporaryDirectory() as directory:
-            desktop=DesktopProcess([sys.executable,'-c',code],Path(directory),port)
+            desktop=DesktopProcess([sys.executable,'-c',code],Path(directory),port,use_environment=False)
             try:
                 desktop.start()
                 self.assertEqual(desktop.ready(),'fixture-pairing-code')
@@ -41,7 +41,7 @@ HTTPServer(('127.0.0.1',{port}),Handler).serve_forever()
 
     def test_reports_process_exit_and_original_startup_error(self):
         with tempfile.TemporaryDirectory() as directory:
-            desktop=DesktopProcess([sys.executable,'-c',"import sys;print('renderer initialization failed',flush=True);sys.exit(7)"],Path(directory),self.port())
+            desktop=DesktopProcess([sys.executable,'-c',"import sys;print('renderer initialization failed',flush=True);sys.exit(7)"],Path(directory),self.port(),use_environment=False)
             try:
                 desktop.start()
                 with self.assertRaisesRegex(AssertionError,'app exited with code 7') as error:

@@ -8,7 +8,7 @@ Build artifacts contain the application and browser companion:
 
 - **Windows 10/11 x64:** run `OpenDownload-Setup-x64.exe`. It installs for your user, adds Start-menu and desktop shortcuts, and provides an uninstaller. Alternatively, extract `OpenDownload-Windows-x64.zip` and double-click `OpenDownload.exe`.
 - **Debian/Ubuntu x64:** install the `.deb` with your package manager, then launch **OpenDownload** from the application menu. For example, `sudo apt install ./OpenDownload-0.3.0-amd64.deb`.
-- **Other Linux distributions:** extract `OpenDownload-Linux-x86_64.tar.gz` and double-click `opendownload`, or run the included `install.sh` for a per-user application-menu installation. The helper needs Python 3; the app itself does not. X11 or XWayland, OpenGL, and the libraries listed in the Debian control metadata are required.
+- **Other Linux distributions:** extract `OpenDownload-Linux-x86_64.tar.gz` and double-click `opendownload`, or run the included `install.sh` for a per-user application-menu installation. The helper needs Python 3; the app itself does not. X11 or XWayland, OpenGL 2.0+, and the libraries listed in the Debian control metadata are required.
 
 The locally built Linux archive requires glibc 2.39+ (for example Ubuntu 24.04+ or Debian 13). The CI Linux build uses Ubuntu 22.04 for broader compatibility; artifacts reflect their own build host. The Debian package declares its actual minimum glibc version. Windows installers and extension archives are unsigned; no store listing or code-signing claim is made.
 
@@ -43,7 +43,7 @@ This is an early desktop release, not complete IDM feature parity. Scheduling, b
 
 ## Build from source
 
-Install Rust with rustup from https://rustup.rs. The pinned toolchain is in `rust-toolchain.toml`. Linux needs a C compiler and the usual X11/OpenGL runtime libraries; Windows native builds need the Visual Studio C++ build tools and Windows SDK.
+Install Rust with rustup from https://rustup.rs. The pinned toolchain is in `rust-toolchain.toml`. Linux needs a C compiler and the usual X11/OpenGL runtime libraries; Windows native builds need the Visual Studio C++ build tools and Windows SDK. Windows uses DirectX 12 through wgpu, with WARP software rendering available; it does not require an OpenGL driver. Set `OPENDOWNLOAD_SOFTWARE_RENDERING=1` to explicitly select a compatible CPU adapter.
 
 ```sh
 cargo build --release --locked
