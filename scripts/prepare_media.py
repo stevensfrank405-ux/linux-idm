@@ -29,6 +29,20 @@ FF_SHA = '09f990289327d3ebfedf4fc15cae3f884a65dab7a5aac7bbb5b01ff83900efd9'
 FLAGS = ['--disable-everything', '--disable-autodetect', '--disable-doc', '--disable-debug', '--disable-network', '--disable-x86asm', '--disable-shared', '--enable-static', '--disable-ffplay', '--enable-ffmpeg', '--enable-ffprobe', '--disable-avdevice', '--disable-swscale', '--disable-swresample', '--enable-protocol=file,pipe', '--enable-demuxer=mov,matroska,aac,mp3,ogg,mpegts,concat,flv', '--enable-muxer=mp4,matroska,webm,ogg,mov,mp3,adts', '--enable-parser=aac,h264,hevc,av1,vp8,vp9,opus,vorbis', '--enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,av1_frame_merge']
 
 
+def run_build(command, directory):
+    diagnostics = ROOT/'test-results/desktop'
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    log = diagnostics/('media-'+directory.name+'.log')
+    print('Running:', ' '.join(command), flush=True)
+    with log.open('w', encoding='utf-8') as output:
+        result = subprocess.run(command, cwd=directory, stdout=output, stderr=subprocess.STDOUT)
+    if result.returncode:
+        tail = log.read_text(encoding='utf-8', errors='replace')[-14000:]
+        config = directory/'ffbuild/config.log'
+        if config.exists():tail += '\nConfigure diagnostics:\n'+config.read_text(encoding='utf-8',errors='replace')[-6000:]
+        raise RuntimeError('Command failed: '+' '.join(command)+'\n'+tail)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--platform', choices=ASSETS, default='windows' if os.name=='nt' else 'linux')
@@ -98,9 +112,9 @@ def main():
                 member.name = '/'.join(member.name.split('/')[1:])
                 if member.name: archive.extract(member, build, filter='data')
         # Configure uses a POSIX shell; on Windows run this script in MSYS2 MINGW64.
-        subprocess.run(['bash','./configure',*flags], cwd=build, check=True)
+        run_build(['bash','./configure',*flags], build)
         stamp.write_text(signature)
-    subprocess.run(['make','-j3'], cwd=build, check=True)
+    run_build(['make','-j3'], build)
     for name in ('ffmpeg','ffprobe'):
         shutil.copy2(build/(name+suffix),target/(name+suffix))
         (target/(name+suffix)).chmod(0o755)
@@ -110,4 +124,9 @@ def main():
     (licenses/'FFmpeg-build.txt').write_text('FFmpeg '+FF_VERSION+'\nSource: '+FF_URL+'\nSHA256: '+FF_SHA+'\nConfigure: ./configure '+' '.join(flags)+'\nBuild: make -j3\nUnmodified FFmpeg source; no external codec libraries, GPL or nonfree components enabled.\nThese tools can be replaced independently of OpenDownload.\n')
     print('Video helpers ready:', target)
 
-if __name__=='__main__': main()
+if __name__=='__main__':
+    try: main()
+    except Exception as error:
+        message = str(error).replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+        print('::error title=Video helper preparation failed::'+message, flush=True)
+        raise
