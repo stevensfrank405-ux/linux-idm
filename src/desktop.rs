@@ -227,13 +227,28 @@ fn bytes(value: u64) -> String {
 impl eframe::App for Desktop {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(Duration::from_millis(200));
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::L)) {
+        if ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND,
+                egui::Key::L,
+            ))
+        }) {
             ctx.memory_mut(|m| m.request_focus(egui::Id::new("download-url")));
         }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::B)) {
+        if ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND,
+                egui::Key::B,
+            ))
+        }) {
             self.pairing = !self.pairing;
         }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Comma)) {
+        if ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND,
+                egui::Key::Comma,
+            ))
+        }) {
             self.settings = !self.settings;
         }
 

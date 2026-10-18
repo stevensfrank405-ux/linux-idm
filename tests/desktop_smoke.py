@@ -101,6 +101,8 @@ with tempfile.TemporaryDirectory(prefix='opendownload-native-') as directory:
         assert process.wait(timeout=10) == 0
         print('PASS: native desktop window, keyboard URL entry, real file integrity, dialogs, graceful close, queue restore, and persistent browser pairing.')
     except Exception as error:
+        if process.poll() is None:
+            subprocess.run(['import', '-window', 'root', str(desktop.log_path.parent/'linux-desktop-failure.png')], check=False)
         desktop.report_failure(error)
         raise
     finally:
