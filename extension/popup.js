@@ -4,7 +4,7 @@ const status = message => { el('status').textContent = message; };
 async function send(url) {
   const result = await api.runtime.sendMessage({ type: 'download', url });
   if (result.error) throw Error(result.error);
-  status('Added to OpenDownload. Check the dashboard for progress.');
+  status('Added to OpenDownload. The desktop progress window opens automatically.');
 }
 async function init() {
   const settings = await api.storage.local.get(['token', 'capture', 'lastError']);
@@ -22,6 +22,14 @@ el('pair').onclick = async () => {
 };
 el('capture').onchange = async () => { await api.storage.local.set({ capture: el('capture').checked }); };
 el('form').onsubmit = async event => { event.preventDefault(); try { await send(el('url').value.trim()); } catch (error) { status(error.message); } };
+el('page-video').onclick = async () => {
+  try {
+    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+    const result = await api.runtime.sendMessage({ type: 'download', url: tab.url, kind: 'video' });
+    if (result.error) throw Error(result.error);
+    status('Video added. Watch extraction and download progress in the desktop window.');
+  } catch (error) { status(error.message); }
+};
 el('scan').onclick = async () => {
   try {
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
@@ -35,7 +43,7 @@ el('scan').onclick = async () => {
       button.onclick = async () => { button.disabled = true; try { await send(item.url); } catch (error) { status(error.message); } finally { button.disabled = false; } };
       row.append(label, button); el('items').append(row);
     }
-    status(items.length ? `${items.length} URLs found. Choose a direct file URL; ordinary page links download HTML.` : 'No transferable URLs found. Blob streams, DRM, and private browser sessions are not supported.');
+    status(items.length ? `${items.length} URLs found. Choose a file or video page URL. Unsupported pages show an error in the app.` : 'No transferable URLs found. Blob streams, DRM, and private browser sessions are not supported.');
   } catch (error) { status('Cannot scan this page: ' + error.message); }
 };
 init().catch(error => status(error.message));

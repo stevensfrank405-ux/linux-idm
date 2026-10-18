@@ -19,6 +19,7 @@ mkdir -p "$app_dir" "$bin_dir" "$data_dir/applications" "$data_dir/icons/hicolor
 cp "$source_dir/opendownload" "$app_dir/opendownload"
 chmod +x "$app_dir/opendownload"
 cp -R "$source_dir/extensions" "$app_dir/"
+cp -R "$source_dir/tools" "$app_dir/"
 ln -sf "$app_dir/opendownload" "$bin_dir/opendownload"
 cp "$source_dir/opendownload.svg" "$data_dir/icons/hicolor/scalable/apps/opendownload.svg"
 # Absolute Exec works even when ~/.local/bin is absent from the desktop session PATH.

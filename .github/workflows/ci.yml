@@ -5,6 +5,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       OPENDOWNLOAD_DIAGNOSTICS: test-results/desktop
+      OPENDOWNLOAD_TOOLS_DIR: ${{ github.workspace }}/dist/tools/linux
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,6 +20,8 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo build --release --locked
+      - name: Build bundled video helpers
+        run: python scripts/prepare_media.py --platform linux
       - run: python -m unittest -v
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - run: node tests/extension_protocol.mjs
@@ -44,6 +47,7 @@ jobs:
     env:
       RUSTFLAGS: -C target-feature=+crt-static
       OPENDOWNLOAD_DIAGNOSTICS: test-results/desktop
+      OPENDOWNLOAD_TOOLS_DIR: ${{ github.workspace }}/dist/tools/windows
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,6 +59,14 @@ jobs:
       - run: rustup show
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo build --release --locked
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: make mingw-w64-x86_64-gcc
+      - name: Build bundled video helpers
+        shell: msys2 {0}
+        run: python scripts/prepare_media.py --platform windows
       - run: python -m unittest -v
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - run: node tests/extension_protocol.mjs

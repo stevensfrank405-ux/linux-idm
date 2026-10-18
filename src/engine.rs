@@ -31,13 +31,19 @@ pub(crate) struct Job {
     pub(crate) segments: u8,
     #[serde(default)]
     pub(crate) directory: Option<PathBuf>,
+    #[serde(default)]
+    pub(crate) media: bool,
+    #[serde(default)]
+    pub(crate) allow_html: bool,
+    #[serde(default)]
+    pub(crate) phase: String,
 }
-struct Data {
-    jobs: BTreeMap<String, Job>,
+pub(crate) struct Data {
+    pub(crate) jobs: BTreeMap<String, Job>,
     active: HashSet<String>,
 }
 pub(crate) struct App {
-    data: Mutex<Data>,
+    pub(crate) data: Mutex<Data>,
     pub(crate) root: PathBuf,
     state: PathBuf,
     pub(crate) token: String,
@@ -46,7 +52,7 @@ pub(crate) struct App {
     pub(crate) connections: std::sync::atomic::AtomicU8,
 }
 impl App {
-    async fn save(&self, data: &Data) -> Result<(), Error> {
+    pub(crate) async fn save(&self, data: &Data) -> Result<(), Error> {
         let temporary = self.state.with_extension("tmp");
         let mut options = tokio::fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
@@ -70,6 +76,7 @@ impl App {
         job.status = "downloading".into();
         job.error.clear();
         job.speed = 0.;
+        job.phase.clear();
         self.save(&data).await?;
         data.active.insert(id.into());
         let app = self.clone();
@@ -94,10 +101,16 @@ impl App {
         Ok(())
     }
     async fn transfer(&self, id: &str) -> Result<(), Error> {
+        if self.data.lock().await.jobs[id].media {
+            return self.media_transfer(id).await;
+        }
         if self.connections.load(std::sync::atomic::Ordering::Relaxed) > 1
             && self.segmented(id).await?
         {
             return Ok(());
+        }
+        if self.data.lock().await.jobs[id].media {
+            return self.media_transfer(id).await;
         }
         self.sequential(id).await
     }
@@ -112,6 +125,10 @@ impl App {
             .send()
             .await?
             .error_for_status()?;
+        if is_html(&probe) && !original.allow_html {
+            self.data.lock().await.jobs.get_mut(id).unwrap().media = true;
+            return Ok(false);
+        }
         if probe.status() != reqwest::StatusCode::PARTIAL_CONTENT {
             return Ok(false);
         }
@@ -295,6 +312,10 @@ impl App {
             }
         }
         let response = request.send().await?.error_for_status()?;
+        if is_html(&response) && !job.allow_html {
+            self.data.lock().await.jobs.get_mut(id).unwrap().media = true;
+            return self.media_transfer(id).await;
+        }
         let total = if response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
             let range = response
                 .headers()
@@ -386,6 +407,41 @@ fn authorized(app: &App, headers: &HeaderMap, token: bool) -> bool {
     (host == format!("127.0.0.1:{}", app.port) || host == format!("localhost:{}", app.port))
         && (!token || headers.get("x-token").and_then(|h| h.to_str().ok()) == Some(&app.token))
 }
+fn is_html(response: &reqwest::Response) -> bool {
+    response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            let mime = v.split(';').next().unwrap_or("").trim();
+            mime.eq_ignore_ascii_case("text/html")
+                || mime.eq_ignore_ascii_case("application/xhtml+xml")
+        })
+}
+pub(crate) fn safe_name(value: &str) -> String {
+    let name: String = value
+        .chars()
+        .filter(|c| !c.is_control() && !['/', '\\', ':', '*', '?', '"', '<', '>', '|'].contains(c))
+        .scan(0, |length, character| {
+            *length += character.len_utf8();
+            (*length <= 160).then_some(character)
+        })
+        .collect();
+    let name = name.trim_end_matches(['.', ' ']);
+    if name.is_empty() {
+        return "download".into();
+    }
+    let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str())
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+    {
+        format!("download-{name}")
+    } else {
+        name.into()
+    }
+}
 fn failure(status: StatusCode, message: impl ToString) -> Response {
     (
         status,
@@ -425,6 +481,8 @@ async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
 #[derive(Deserialize)]
 struct Add {
     pub(crate) url: String,
+    #[serde(default)]
+    kind: String,
 }
 #[derive(Deserialize)]
 struct Action {
@@ -450,31 +508,18 @@ async fn add(State(app): State<Arc<App>>, headers: HeaderMap, Json(input): Json<
             )
         }
     };
-    let name: String = url
-        .path_segments()
-        .and_then(|mut s| s.next_back())
-        .unwrap_or("download")
-        .chars()
-        .filter(|c| !c.is_control() && !['/', '\\', ':', '*', '?', '"', '<', '>', '|'].contains(c))
-        .take(160)
-        .collect();
-    let name = name.trim_end_matches(['.', ' ']).to_owned();
-    let reserved = name.split('.').next().unwrap_or("").to_ascii_uppercase();
-    let name = if [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ]
-    .contains(&reserved.as_str())
-    {
-        format!("download-{name}")
-    } else {
-        name
-    };
-    let name = if name.is_empty() || name == "." || name == ".." {
-        "download".into()
-    } else {
-        name
-    };
+    if !["", "auto", "video", "file"].contains(&input.kind.as_str()) {
+        return failure(
+            StatusCode::BAD_REQUEST,
+            "Choose auto, video, or file download mode",
+        );
+    }
+    let name = safe_name(
+        url.path_segments()
+            .and_then(|mut s| s.next_back())
+            .unwrap_or("download"),
+    );
+    let media = input.kind == "video" || (input.kind != "file" && crate::media::is_media_url(&url));
     let mut data = app.data.lock().await;
     let original = name.clone();
     let mut name = name;
@@ -501,6 +546,9 @@ async fn add(State(app): State<Arc<App>>, headers: HeaderMap, Json(input): Json<
             validator: None,
             segments: 0,
             directory: Some(app.root.clone()),
+            media,
+            allow_html: input.kind == "file",
+            phase: String::new(),
         },
     );
     if let Err(error) = app.save(&data).await {
@@ -508,7 +556,7 @@ async fn add(State(app): State<Arc<App>>, headers: HeaderMap, Json(input): Json<
     }
     drop(data);
     match app.resume(&id).await {
-        Ok(()) => Json(serde_json::json!({"ok":true})).into_response(),
+        Ok(()) => Json(serde_json::json!({"ok":true,"id":id})).into_response(),
         Err(error) => failure(StatusCode::BAD_REQUEST, error),
     }
 }
@@ -603,7 +651,7 @@ pub(crate) async fn start(
         client: reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
             .read_timeout(Duration::from_secs(30))
-            .user_agent("OpenDownload/0.3")
+            .user_agent("OpenDownload/0.4")
             .build()?,
     });
     {

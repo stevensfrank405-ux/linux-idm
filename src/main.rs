@@ -1,6 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod desktop;
 mod engine;
+mod media;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -71,7 +72,15 @@ fn run() -> Result<(), engine::Error> {
     let app = runtime.block_on(engine::start(preferences.downloads.clone(), state, port, preferences.connections))
         .map_err(|error| format!("Cannot start OpenDownload: {error}. If port {port} is busy, close the other instance first."))?;
     if headless {
-        runtime.block_on(async { tokio::signal::ctrl_c().await })?;
+        runtime.block_on(async {
+            #[cfg(unix)]
+            {
+                let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+                tokio::select! { result = tokio::signal::ctrl_c() => result, _ = terminate.recv() => Ok(()) }
+            }
+            #[cfg(not(unix))]
+            tokio::signal::ctrl_c().await
+        })?;
     } else {
         let desktop = desktop::Desktop::new(
             app.clone(),

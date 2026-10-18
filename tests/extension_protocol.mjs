@@ -18,7 +18,7 @@ const event = name => ({addListener: callback => {events[name]=callback;}});
 const api = {
   storage:{local:{get:async()=>({...settings}),set:async values=>Object.assign(settings,values)}},
   action:{setBadgeText:async value=>calls.push(['badge',value.text])},
-  contextMenus:{removeAll:async()=>{},create:async value=>calls.push(['menu',value.id]),onClicked:event('click')},
+  contextMenus:{removeAll:async()=>{},create:async value=>calls.push(['menu',value.id,value.contexts]),onClicked:event('click')},
   runtime:{onInstalled:event('installed'),onMessage:event('message')},
   downloads:{onCreated:event('created'),pause:async id=>calls.push(['pause',id]),cancel:async id=>calls.push(['cancel',id]),resume:async id=>calls.push(['resume',id])}
 };
@@ -29,6 +29,8 @@ try {
   settings.token = token;
   vm.runInContext(await readFile('extension/background.js','utf8'),context);
   const run = code=>vm.runInContext(code,context);
+  events.installed(); await pause(10);
+  assert.ok(calls.find(c=>c[0]==='menu')[2].includes('page'));
   await run(`sendDownload(${JSON.stringify(source+'/direct.txt')})`);
   const queue=()=>fetch('http://127.0.0.1:8765/api/downloads',{headers:{'X-Token':token}}).then(r=>r.json());
   await until(async()=>(await queue()).some(j=>j.status==='completed'));
@@ -51,7 +53,11 @@ try {
   await events.click({menuItemId:'opendownload',srcUrl:source+'/image.png'});
   const reply=await new Promise(resolve=>events.message({type:'download',url:source+'/message.txt'},null,resolve));
   assert.equal(reply.ok,true);
-  await until(async()=>(await queue()).filter(j=>j.status==='completed').length===4);
+  await events.click({menuItemId:'opendownload',pageUrl:source+'/current-page.txt'});
+  const explicit=await new Promise(resolve=>events.message({type:'download',url:source+'/explicit-file.txt',kind:'file'},null,resolve));
+  assert.equal(explicit.ok,true);
+  await until(async()=>(await queue()).filter(j=>j.status==='completed').length===6);
+  assert.equal((await queue()).find(j=>j.url.endsWith('/explicit-file.txt')).allow_html,true);
   console.log('PASS: real Rust API handoff, file integrity, URL/token rejection, context menu, message bridge, capture opt-in, cancellation and failure recovery. Browser APIs were mocked.');
 } finally {
   app.kill();fixture.closeAllConnections();fixture.close();await pause(200);

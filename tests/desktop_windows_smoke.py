@@ -34,7 +34,7 @@ user32.IsWindowVisible.argtypes=[wintypes.HWND]
 user32.GetWindowTextW.argtypes=[wintypes.HWND,wintypes.LPWSTR,ctypes.c_int]
 user32.PostMessageW.argtypes=[wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM]
 
-def find_window(pid):
+def find_window(pid, progress=False):
     windows=[]
     @callback_type
     def callback(hwnd,_):
@@ -42,7 +42,7 @@ def find_window(pid):
         user32.GetWindowThreadProcessId(hwnd,ctypes.byref(process_id))
         title=ctypes.create_unicode_buffer(512)
         user32.GetWindowTextW(hwnd,title,len(title))
-        if process_id.value==pid and user32.IsWindowVisible(hwnd) and title.value=='OpenDownload': windows.append(hwnd)
+        if process_id.value==pid and user32.IsWindowVisible(hwnd) and (title.value.startswith('Download —') if progress else title.value=='OpenDownload'): windows.append(hwnd)
         return True
     user32.EnumWindows(callback,0)
     return windows[0] if windows else None
@@ -64,7 +64,12 @@ with tempfile.TemporaryDirectory(prefix='opendownload-windows-') as directory:
         assert json.load(urllib.request.urlopen(request))['ok']
         def completed():
             return (root/'files/windows.bin').exists() and list(json.loads((root/'queue.json').read_text()).values())[0]['status']=='completed'
+        popup=desktop.wait(lambda:find_window(process.pid,progress=True),'Separate Windows progress window did not appear')
+        assert popup!=hwnd
         desktop.wait(completed,'Windows desktop engine transfer failed')
+        user32.PostMessageW(popup,0x0010,0,0)
+        desktop.wait(lambda:not find_window(process.pid,progress=True),'Closing progress window did not dismiss it')
+        assert process.poll() is None
         assert (root/'files/windows.bin').read_bytes()==PAYLOAD
         user32.PostMessageW(hwnd,0x0010,0,0)  # WM_CLOSE: normal native close.
         assert process.wait(timeout=15)==0
@@ -75,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix='opendownload-windows-') as directory:
         assert completed()
         user32.PostMessageW(hwnd,0x0010,0,0)
         assert process.wait(timeout=15)==0
-        print('PASS: native Windows window, desktop-engine file integrity, graceful close, queue restoration, and persistent pairing.')
+        print('PASS: native Windows window, desktop-engine file integrity, separate progress popup, graceful close, queue restoration, and persistent pairing.')
     except Exception as error:
         desktop.report_failure(error)
         raise

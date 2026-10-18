@@ -15,7 +15,7 @@ parser.add_argument('--platform', choices=['linux', 'windows'], default='windows
 parser.add_argument('--binary', type=Path)
 parser.add_argument('--installer', action='store_true', help='Build Windows NSIS installer (makensis must be available)')
 args = parser.parse_args()
-version = '0.3.0'
+version = '0.4.0'
 output = root / 'dist'
 stage = output / args.platform
 stage.mkdir(parents=True, exist_ok=True)
@@ -35,6 +35,10 @@ for file in ('manifest.json', 'background.js', 'popup.js', 'popup.html', 'scanne
     shutil.copy2(root / 'extension' / file, chromium / file)
 shutil.copy2(root / 'extension/README.md', companion / 'README.md')
 shutil.copy2(output / 'opendownload-firefox.zip', companion)
+tools = output / 'tools' / args.platform
+if not all((tools / name).is_file() for name in (('yt-dlp.exe', 'node.exe', 'ffmpeg.exe', 'ffprobe.exe') if args.platform == 'windows' else ('yt-dlp', 'node', 'ffmpeg', 'ffprobe'))):
+    raise SystemExit('Prepare bundled video tools first: python scripts/prepare_media.py --platform ' + args.platform)
+shutil.copytree(tools, stage / 'tools', dirs_exist_ok=True)
 if args.platform == 'windows':
     # GNU cross builds may depend on MinGW runtime DLLs; bundle only direct dependencies.
     objdump = shutil.which('x86_64-w64-mingw32-objdump')
@@ -61,7 +65,7 @@ else:
     shutil.copy2(root / 'assets/opendownload.svg', stage)
     (stage / 'install.sh').chmod(0o755)
     for path in stage.rglob('*'):
-        path.chmod(0o755 if path.is_dir() or path.name in ('opendownload', 'install.sh') else 0o644)
+        path.chmod(0o755 if path.is_dir() or path.name in ('opendownload', 'install.sh', 'yt-dlp', 'node', 'ffmpeg', 'ffprobe') else 0o644)
     stage.chmod(0o755)
     archive = output / f'OpenDownload-Linux-{platform.machine()}.tar.gz'
     with tarfile.open(archive, 'w:gz') as bundle:
@@ -80,8 +84,9 @@ else:
         shutil.copy2(stage / 'opendownload.desktop', deb / 'usr/share/applications')
         shutil.copy2(stage / 'opendownload.svg', deb / 'usr/share/icons/hicolor/scalable/apps')
         shutil.copytree(companion, deb / 'usr/share/opendownload/extensions')
+        shutil.copytree(tools, deb / 'usr/lib/opendownload/tools')
         for path in deb.rglob('*'):
-            path.chmod(0o755 if path.is_dir() or path == deb / 'usr/bin/opendownload' else 0o644)
+            path.chmod(0o755 if path.is_dir() or path == deb / 'usr/bin/opendownload' or (path.parent == deb / 'usr/lib/opendownload/tools' and path.name in ('yt-dlp', 'node', 'ffmpeg', 'ffprobe')) else 0o644)
         deb.chmod(0o755)
         subprocess.run(['dpkg-deb', '--build', '--root-owner-group', str(deb), str(output / f'OpenDownload-{version}-{arch}.deb')], check=True)
 print(archive)

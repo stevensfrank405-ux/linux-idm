@@ -5,13 +5,13 @@ function validUrl(value) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password; }
   catch { return false; }
 }
-async function sendDownload(url) {
-  if (!validUrl(url)) throw Error('Only direct HTTP(S) URLs are supported. Blob and data URLs cannot be transferred.');
+async function sendDownload(url, kind = 'auto') {
+  if (!validUrl(url)) throw Error('Only HTTP(S) URLs are supported. Blob and data URLs cannot be transferred.');
   const { token } = await api.storage.local.get('token');
   if (!token) throw Error('Pair the extension with OpenDownload first.');
   const response = await fetch(endpoint + '/api/add', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': token },
-    body: JSON.stringify({ url }), signal: AbortSignal.timeout(5000)
+    body: JSON.stringify({ url, kind }), signal: AbortSignal.timeout(5000)
   });
   const result = await response.json();
   if (!response.ok) throw Error(result.error || 'OpenDownload rejected the download.');
@@ -20,17 +20,17 @@ async function sendDownload(url) {
 async function badge(text) { await api.action.setBadgeText({ text }); }
 api.runtime.onInstalled.addListener(() => {
   api.contextMenus.removeAll().then(() => api.contextMenus.create({
-    id: 'opendownload', title: 'Download with OpenDownload', contexts: ['link', 'image', 'video', 'audio']
+    id: 'opendownload', title: 'Download with OpenDownload', contexts: ['page', 'link', 'image', 'video', 'audio']
   }));
 });
 api.contextMenus.onClicked.addListener(async info => {
   if (info.menuItemId !== 'opendownload') return;
-  try { await sendDownload(info.srcUrl || info.linkUrl); await badge(''); }
+  try { await sendDownload(info.srcUrl || info.linkUrl || info.pageUrl); await badge(''); }
   catch (error) { await api.storage.local.set({ lastError: error.message }); await badge('!'); }
 });
 api.runtime.onMessage.addListener((message, _sender, reply) => {
   if (message.type !== 'download') return false;
-  sendDownload(message.url).then(() => reply({ ok: true })).catch(error => reply({ error: error.message }));
+  sendDownload(message.url, message.kind || 'auto').then(() => reply({ ok: true })).catch(error => reply({ error: error.message }));
   return true;
 });
 api.downloads.onCreated.addListener(async item => {

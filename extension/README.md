@@ -18,7 +18,7 @@ Run `python3 extension/package.py`. Open `about:debugging`, choose **This Firefo
 
 ## Use
 
-Right-click a direct link or media element and select **Download with OpenDownload**, or use the popup's URL input and page scanner. The scanner lists up to 200 unique HTTP(S) URLs in the current page's top frame. Ordinary links can point to HTML; choose the direct file you want. Embedded protected videos and blob streams cannot be downloaded this way.
+On a YouTube or other supported video page, open the popup and choose **Download video from this page**. You can also right-click a page, link, or media element and select **Download with OpenDownload**, paste a URL, or use the scanner (up to 200 HTTP(S) URLs in the top frame). The desktop app extracts supported video pages and opens a separate progress window. Unsupported pages report an error. Protected videos, blob URLs, and browser-only login sessions are unsupported.
 
 **Send new browser downloads to the app** is optional and off by default. It pauses a browser transfer before handoff and cancels that transfer only after the app accepts the URL. A failed handoff resumes the browser transfer; already completed downloads stay in the browser. The app may subsequently fail because it lacks a site's browser cookies or because a URL expires. In that case, disable capture and retry in the browser. A badge marked `!` means the popup has a message to review.
 
