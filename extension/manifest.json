@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OpenDownload Companion",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Send links, images, media, and optional browser downloads to your local OpenDownload app.",
   "permissions": ["storage", "contextMenus", "activeTab", "scripting", "downloads"],
   "host_permissions": ["http://127.0.0.1:8765/*"],

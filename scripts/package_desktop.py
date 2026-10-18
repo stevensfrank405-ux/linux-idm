@@ -15,7 +15,7 @@ parser.add_argument('--platform', choices=['linux', 'windows'], default='windows
 parser.add_argument('--binary', type=Path)
 parser.add_argument('--installer', action='store_true', help='Build Windows NSIS installer (makensis must be available)')
 args = parser.parse_args()
-version = '0.4.1'
+version = '0.4.2'
 output = root / 'dist'
 stage = output / args.platform
 stage.mkdir(parents=True, exist_ok=True)

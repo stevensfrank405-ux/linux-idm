@@ -152,6 +152,14 @@ class Downloads(unittest.TestCase):
         self.wait_for(lambda: self.job()['status'] == 'completed')
         self.assertEqual((self.root / 'files/no-range').read_bytes(), PAYLOAD)
 
+    def test_immediate_resume_waits_for_pausing_workers(self):
+        self.api('add', {'url': self.url + '/quick-resume.bin'})
+        self.wait_for(lambda: self.job()['downloaded'] > 0)
+        self.api('pause', {'id': self.job()['id']})
+        self.api('resume', {'id': self.job()['id']})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual((self.root / 'files/quick-resume.bin').read_bytes(), PAYLOAD)
+
     def test_parallel_ranges_and_integrity(self):
         self.api('add', {'url': self.url + '/parallel'})
         self.wait_for(lambda: self.job()['status'] == 'completed')

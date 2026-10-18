@@ -65,7 +65,18 @@ impl App {
         Ok(())
     }
     async fn resume(self: &Arc<Self>, id: &str) -> Result<(), Error> {
-        let mut data = self.data.lock().await;
+        // A pause cancels workers asynchronously (including the Windows process tree).
+        // Accept a fast resume only after those workers release their partial files.
+        let mut data = loop {
+            let data = self.data.lock().await;
+            let stopping = data.active.contains(id)
+                && data.jobs.get(id).is_some_and(|job| job.status == "paused");
+            if !stopping {
+                break data;
+            }
+            drop(data);
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        };
         if data.active.contains(id) {
             return Ok(());
         }
