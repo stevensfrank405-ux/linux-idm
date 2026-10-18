@@ -1,13 +1,13 @@
 # Browser companion installation
 
-Start the Rust application on your Linux machine at its default port, 8765. The browser must run on the same machine. There are no third-party services or accounts.
+Start the OpenDownload desktop application on Windows or Linux at its default port, 8765. The browser must run on the same machine. There are no third-party services or accounts.
 
 ## Chrome, Chromium, Brave, Edge
 
 1. Open `chrome://extensions` (or your browser's extensions page).
 2. Enable Developer mode and select **Load unpacked**.
-3. Select this repository's `extension` directory, containing `manifest.json`.
-4. Open the app dashboard, click **Browser pairing**, and copy the token.
+3. Select the bundled `extensions/chromium` directory, or this repository's `extension` directory, containing `manifest.json`.
+4. In the desktop app, open **Browser companion** and choose **Copy pairing code**. The optional headless dashboard also has a **Browser pairing** button.
 5. Open the extension popup, paste the token, and choose **Save pairing**.
 
 If your browser administrator blocks unpacked extensions, installation requires an administrator-approved distribution method. This project does not bypass that policy.
@@ -22,7 +22,7 @@ Right-click a direct link or media element and select **Download with OpenDownlo
 
 **Send new browser downloads to the app** is optional and off by default. It pauses a browser transfer before handoff and cancels that transfer only after the app accepts the URL. A failed handoff resumes the browser transfer; already completed downloads stay in the browser. The app may subsequently fail because it lacks a site's browser cookies or because a URL expires. In that case, disable capture and retry in the browser. A badge marked `!` means the popup has a message to review.
 
-Pair again after restarting the app. Treat the pairing token as a password: anyone with it and local access can queue downloads. The token is stored in extension local storage and never sent beyond `127.0.0.1:8765`. Custom app ports are not supported by this version of the companion.
+Pairing is remembered after restarting the app. Re-pair if its bridge-key file is deleted or you choose a different state file. Treat the pairing token as a password: anyone with it and local access can queue downloads. The token is stored in extension local storage and never sent beyond `127.0.0.1:8765`. Custom app ports are not supported by this version of the companion.
 
 ## Permissions
 

@@ -1,23 +1,64 @@
-name: Rust checks
+name: Desktop builds and checks
 on: [push, pull_request]
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install pinned toolchain
-        run: rustup show
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Desktop test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon0 libgl1-mesa-dri libegl1 libx11-6 libxcursor1 libxi6 libxrandr2 xvfb xdotool imagemagick
+      - run: rustup show
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo build --release --locked
-      - run: python3 -m unittest -v
+      - run: python -m unittest -v
       - run: node tests/extension_protocol.mjs
       - run: CHROMIUM=google-chrome node tests/browser_smoke.mjs
-      - run: python3 scripts/package_linux.py
+      - name: Native desktop smoke test
+        run: xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 python tests/desktop_smoke.py
+      - run: python scripts/package_desktop.py --platform linux
       - uses: actions/upload-artifact@v4
         with:
-          name: opendownload-linux-and-browser-extensions
-          path: dist/*
+          name: OpenDownload-Linux
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
+            dist/opendownload-*.zip
+  windows:
+    runs-on: windows-latest
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: rustup show
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo build --release --locked
+      - run: python -m unittest -v
+      - run: node tests/extension_protocol.mjs
+      - run: python tests/desktop_windows_smoke.py
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+      - name: Package desktop and browser companion
+        shell: pwsh
+        run: |
+          $env:PATH += ";${env:ProgramFiles(x86)}\NSIS"
+          python scripts/package_desktop.py --platform windows --installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDownload-Windows
+          path: |
+            dist/OpenDownload-Setup-x64.exe
+            dist/OpenDownload-Windows-x64.zip
+            dist/opendownload-*.zip

@@ -16,7 +16,7 @@ const fixture = createServer((request, response) => {
 });
 await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve));
 const source = `http://127.0.0.1:${fixture.address().port}`;
-const app = spawn(resolve('target/release/opendownload'), ['--downloads', join(temporary, 'files'), '--state', join(temporary, 'queue.json')], { stdio: 'ignore' });
+const app = spawn(resolve(process.env.OPENDOWNLOAD_BIN || 'target/release/opendownload' + (process.platform === 'win32' ? '.exe' : '')), ['--headless', '--downloads', join(temporary, 'files'), '--state', join(temporary, 'queue.json')], { stdio: 'ignore' });
 const browser = spawn(process.env.CHROMIUM || 'chromium', ['--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run',  '--disable-dev-shm-usage', `--user-data-dir=${join(temporary, 'profile')}`, '--remote-debugging-port=9224',  'about:blank'], { stdio: 'ignore' });
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn) { for (let i=0; i<200; i++) { try { const result = await fn(); if (result) return result; } catch {} await pause(50); } throw Error('Timed out waiting for browser/app readiness'); }

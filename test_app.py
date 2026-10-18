@@ -10,6 +10,7 @@ import urllib.error
 import json
 import re
 import socket
+import os
 
 PAYLOAD = bytes(range(256)) * 8192
 
@@ -90,7 +91,7 @@ class Downloads(unittest.TestCase):
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
         self.base = f'http://127.0.0.1:{port}'
-        self.command = [str(Path('target/release/opendownload').resolve()), '--port', str(port), '--downloads', str(self.root / 'files'), '--state', str(self.root / 'queue.json')]
+        self.command = [str(Path(os.environ.get('OPENDOWNLOAD_BIN', 'target/release/opendownload' + ('.exe' if os.name == 'nt' else ''))).resolve()), '--headless', '--port', str(port), '--downloads', str(self.root / 'files'), '--state', str(self.root / 'queue.json')]
         self.start()
         self.addCleanup(self.stop)
 
@@ -201,6 +202,46 @@ class Downloads(unittest.TestCase):
         self.wait_for(lambda: self.job()['status'] == 'completed')
         self.assertEqual(self.job()['segments'], 0)
         self.assertEqual((self.root / 'files/single').read_bytes(), PAYLOAD)
+
+    def test_resume_keeps_original_destination_after_settings_change(self):
+        self.api('add', {'url': self.url + '/original.bin'})
+        self.wait_for(lambda: self.job()['downloaded'] > 65536)
+        self.api('pause', {'id': self.job()['id']})
+        time.sleep(.1)
+        self.stop()
+        self.command[self.command.index('--downloads') + 1] = str(self.root / 'new-files')
+        self.start()
+        self.api('resume', {'id': self.job()['id']})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual((self.root / 'files/original.bin').read_bytes(), PAYLOAD)
+        self.assertFalse((self.root / 'new-files/original.bin').exists())
+
+    def test_windows_safe_filename(self):
+        self.api('add', {'url': self.url + '/CON'})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual(self.job()['name'], 'download-CON')
+        self.assertEqual((self.root / 'files/download-CON').read_bytes(), PAYLOAD)
+
+    def test_remove_completed_keeps_file(self):
+        self.api('add', {'url': self.url + '/keep.bin'})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.api('remove', {'id': self.job()['id']})
+        self.assertEqual(self.api('downloads'), [])
+        self.assertEqual((self.root / 'files/keep.bin').read_bytes(), PAYLOAD)
+
+    def test_pairing_survives_restart(self):
+        token = self.token
+        self.stop()
+        self.start()
+        self.assertEqual(self.token, token)
+
+    def test_second_instance_does_not_replace_queue(self):
+        self.api('add', {'url': self.url + '/first.bin'})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        before = (self.root / 'queue.json').read_bytes()
+        result = subprocess.run(self.command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.root / 'queue.json').read_bytes(), before)
 
     def test_existing_file_is_preserved(self):
         files = self.root / 'files'

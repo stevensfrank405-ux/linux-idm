@@ -10,7 +10,7 @@ const temporary = await mkdtemp(join(tmpdir(), 'opendownload-protocol-'));
 const fixture = createServer((_request, response) => response.end('extension file content'));
 await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve));
 const source = `http://127.0.0.1:${fixture.address().port}`;
-const app = spawn(resolve('target/release/opendownload'), ['--downloads',join(temporary,'files'),'--state',join(temporary,'queue.json')], {stdio:'ignore'});
+const app = spawn(resolve(process.env.OPENDOWNLOAD_BIN || 'target/release/opendownload' + (process.platform === 'win32' ? '.exe' : '')), ['--headless', '--downloads',join(temporary,'files'),'--state',join(temporary,'queue.json')], {stdio:'ignore'});
 const pause = ms => new Promise(resolve => setTimeout(resolve,ms));
 async function until(fn) { for(let i=0;i<100;i++){try{const value=await fn();if(value)return value;}catch{}await pause(30);}throw Error('Readiness timeout'); }
 const events = {}, settings = {}, calls = [];

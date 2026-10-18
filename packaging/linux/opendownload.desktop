@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OpenDownload
+GenericName=Download Manager
+Comment=Free desktop download manager with browser integration
+Exec=opendownload
+Icon=opendownload
+Terminal=false
+Categories=Network;FileTransfer;
+StartupWMClass=opendownload
