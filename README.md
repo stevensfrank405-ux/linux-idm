@@ -1,13 +1,13 @@
 # OpenDownload Desktop
 
-A free, MIT-licensed **native desktop download manager for Windows and Linux**, written in Rust. It opens its own application window and connects to a companion browser extension. No browser window or Python runtime is required for normal desktop use. This is an independent project, not Internet Download Manager or proprietary IDM source code.
+A free, MIT-licensed **native desktop download manager for Windows and Linux**, written in Rust. It opens its own application window and connects to a companion browser extension. No browser window or separately installed Python runtime is required for normal desktop use. This is an independent project, not Internet Download Manager or proprietary IDM source code.
 
 ## Install and open
 
 Version 0.4 adds video page extraction and separate native progress windows. Build artifacts contain the application, browser companion, yt-dlp, Node.js, and a small FFmpeg/ffprobe build:
 
 - **Windows 10/11 x64:** run `OpenDownload-Setup-x64.exe`. It installs for your user, adds Start-menu and desktop shortcuts, and provides an uninstaller. Alternatively, extract `OpenDownload-Windows-x64.zip` and double-click `OpenDownload.exe`.
-- **Debian/Ubuntu x64:** install the `.deb` with your package manager, then launch **OpenDownload** from the application menu. For example, `sudo apt install ./OpenDownload-0.4.0-amd64.deb`.
+- **Debian/Ubuntu x64:** install the `.deb` with your package manager, then launch **OpenDownload** from the application menu. For example, `sudo apt install ./OpenDownload-0.4.1-amd64.deb`.
 - **Other Linux distributions:** extract `OpenDownload-Linux-x86_64.tar.gz` and double-click `opendownload`, or run the included `install.sh` for a per-user application-menu installation. The helper needs Python 3; the app itself does not. X11 or XWayland, OpenGL 2.0+, and the libraries listed in the Debian control metadata are required.
 
 The locally built Linux archive requires glibc 2.39+ (for example Ubuntu 24.04+ or Debian 13). The CI Linux build uses Ubuntu 22.04 for broader compatibility; artifacts reflect their own build host. The Debian package declares its actual minimum glibc version. Windows installers and extension archives are unsigned; no store listing or code-signing claim is made.

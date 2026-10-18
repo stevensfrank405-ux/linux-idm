@@ -34,7 +34,7 @@ Section "OpenDownload" Main
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenDownload" "DisplayName" "OpenDownload"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenDownload" "UninstallString" '"$INSTDIR\Uninstall.exe"'
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenDownload" "DisplayVersion" "0.4.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenDownload" "DisplayVersion" "0.4.1"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenDownload" "Publisher" "OpenDownload contributors"
 SectionEnd
 Section "Uninstall"

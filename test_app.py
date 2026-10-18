@@ -202,6 +202,9 @@ class Downloads(unittest.TestCase):
         self.wait_for(lambda: self.job()['status'] == 'completed')
         self.assertEqual(self.job()['segments'], 0)
         self.assertEqual((self.root / 'files/single').read_bytes(), PAYLOAD)
+        checkpoint = json.loads((self.root / 'queue.json').read_text())[self.job()['id']]
+        self.assertEqual(checkpoint['status'], 'completed')
+        self.assertEqual(checkpoint['speed'], 0)
 
     def test_resume_keeps_original_destination_after_settings_change(self):
         self.api('add', {'url': self.url + '/original.bin'})
@@ -239,6 +242,9 @@ class Downloads(unittest.TestCase):
         self.api('add', {'url': self.url + '/first.bin'})
         self.wait_for(lambda: self.job()['status'] == 'completed')
         before = (self.root / 'queue.json').read_bytes()
+        checkpoint = json.loads(before)[self.job()['id']]
+        self.assertEqual(checkpoint['status'], 'completed')
+        self.assertEqual(checkpoint['speed'], 0)
         result = subprocess.run(self.command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.root / 'queue.json').read_bytes(), before)

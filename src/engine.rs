@@ -283,10 +283,14 @@ impl App {
         }
         tokio::fs::hard_link(&partial, root.join(&original.name)).await?;
         tokio::fs::remove_file(partial).await?;
-        data.jobs.get_mut(id).unwrap().status = "completed".into();
+        let job = data.jobs.get_mut(id).unwrap();
+        job.status = "completed".into();
+        job.speed = 0.;
         for part in 0..count {
             let _ = tokio::fs::remove_file(root.join(format!("{id}.segment-{part}"))).await;
         }
+        // Readers must never observe completion before its durable checkpoint.
+        self.save(&data).await?;
         Ok(true)
     }
     async fn sequential(&self, id: &str) -> Result<(), Error> {
@@ -393,9 +397,11 @@ impl App {
         tokio::fs::hard_link(&partial, root.join(&job.name)).await?;
         tokio::fs::remove_file(partial).await?;
         job.status = "completed".into();
+        job.speed = 0.;
         for part in 0..16 {
             let _ = tokio::fs::remove_file(root.join(format!("{id}.segment-{part}"))).await;
         }
+        self.save(&data).await?;
         Ok(())
     }
 }
