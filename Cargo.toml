@@ -1,0 +1,15 @@
+[package]
+name = "opendownload"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A free local download manager for Linux"
+
+[dependencies]
+axum = "0.8"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
