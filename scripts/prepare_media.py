@@ -30,6 +30,11 @@ FLAGS = ['--disable-everything', '--disable-autodetect', '--disable-doc', '--dis
 
 
 def run_build(command, directory):
+    # Windows CreateProcess searches System32 before PATH for bare commands.
+    # Resolve MSYS2 bash explicitly so it cannot accidentally launch the WSL stub.
+    executable = shutil.which(command[0])
+    if not executable: raise FileNotFoundError('Required build tool is missing from PATH: '+command[0])
+    command = [executable, *command[1:]]
     diagnostics = ROOT/'test-results/desktop'
     diagnostics.mkdir(parents=True, exist_ok=True)
     log = diagnostics/('media-'+directory.name+'.log')
