@@ -27,6 +27,8 @@ struct Job {
     speed: f64,
     error: String,
     validator: Option<String>,
+    #[serde(default)]
+    segments: u8,
 }
 struct Data {
     jobs: BTreeMap<String, Job>,
@@ -39,6 +41,7 @@ struct App {
     token: String,
     port: u16,
     client: reqwest::Client,
+    connections: u8,
 }
 impl App {
     async fn save(&self, data: &Data) -> Result<(), Error> {
@@ -89,6 +92,184 @@ impl App {
         Ok(())
     }
     async fn transfer(&self, id: &str) -> Result<(), Error> {
+        if self.connections > 1 && self.segmented(id).await? {
+            return Ok(());
+        }
+        self.sequential(id).await
+    }
+    async fn segmented(&self, id: &str) -> Result<bool, Error> {
+        let original = self.data.lock().await.jobs[id].clone();
+        let probe = self
+            .client
+            .get(&original.url)
+            .header("Accept-Encoding", "identity")
+            .header("Range", "bytes=0-0")
+            .send()
+            .await?
+            .error_for_status()?;
+        if probe.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Ok(false);
+        }
+        let range = probe
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let total = range
+            .strip_prefix("bytes 0-0/")
+            .and_then(|v| v.parse::<u64>().ok());
+        // Strong validators prevent combining bytes from different file versions.
+        let validator = probe
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| v.starts_with('"') && v.ends_with('"'))
+            .map(str::to_owned);
+        let (Some(total), Some(validator)) = (total, validator) else {
+            return Ok(false);
+        };
+        if total < 1024 * 1024 {
+            return Ok(false);
+        }
+        drop(probe);
+        // A previous sequential partial cannot be reused after adopting a new validator.
+        let _ = tokio::fs::remove_file(self.root.join(format!("{}.part", original.name))).await;
+        let count = self.connections;
+        let reuse = original.segments == count
+            && original.total == Some(total)
+            && original.validator.as_ref() == Some(&validator);
+        let mut offsets = Vec::new();
+        for part in 0..count {
+            let path = self.root.join(format!("{id}.segment-{part}"));
+            let length = total * (u64::from(part) + 1) / u64::from(count)
+                - total * u64::from(part) / u64::from(count);
+            let existing = tokio::fs::metadata(&path)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+            if !reuse || existing > length {
+                let _ = tokio::fs::remove_file(&path).await;
+                offsets.push(0);
+            } else {
+                offsets.push(existing);
+            }
+        }
+        {
+            let mut data = self.data.lock().await;
+            let job = data.jobs.get_mut(id).unwrap();
+            job.total = Some(total);
+            job.validator = Some(validator.clone());
+            job.segments = count;
+            job.downloaded = offsets.iter().sum();
+            self.save(&data).await?;
+        }
+        let initial: u64 = offsets.iter().sum();
+        let started = Instant::now();
+        let source_url = &original.url;
+        let futures = offsets.into_iter().enumerate().map(|(part, offset)| {
+            let validator = &validator;
+            async move {
+                let begin = total * part as u64 / u64::from(count);
+                let end = total * (part as u64 + 1) / u64::from(count) - 1;
+                if offset == end - begin + 1 {
+                    return Ok::<bool, Error>(true);
+                }
+                let response = self
+                    .client
+                    .get(source_url)
+                    .header("Accept-Encoding", "identity")
+                    .header("Range", format!("bytes={}-{end}", begin + offset))
+                    .header("If-Range", validator)
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let expected = format!("bytes {}-{end}/{total}", begin + offset);
+                if response.headers().get("etag").and_then(|v| v.to_str().ok())
+                    != Some(validator.as_str())
+                    || response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+                    || response
+                        .headers()
+                        .get("content-range")
+                        .and_then(|v| v.to_str().ok())
+                        != Some(expected.as_str())
+                {
+                    return Ok(false);
+                }
+                let mut output = tokio::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(self.root.join(format!("{id}.segment-{part}")))
+                    .await?;
+                let mut stream = response.bytes_stream();
+                let mut received = offset;
+                let mut saved = Instant::now();
+                loop {
+                    if self.data.lock().await.jobs[id].status != "downloading" {
+                        return Ok(true);
+                    }
+                    let Some(chunk) =
+                        tokio::time::timeout(Duration::from_secs(30), stream.next()).await?
+                    else {
+                        break;
+                    };
+                    let chunk = chunk?;
+                    if received + chunk.len() as u64 > end - begin + 1 {
+                        return Err("Segment exceeded its range".into());
+                    }
+                    output.write_all(&chunk).await?;
+                    received += chunk.len() as u64;
+                    let mut data = self.data.lock().await;
+                    let job = data.jobs.get_mut(id).unwrap();
+                    job.downloaded += chunk.len() as u64;
+                    job.speed = (job.downloaded - initial) as f64
+                        / started.elapsed().as_secs_f64().max(0.001);
+                    if saved.elapsed() > Duration::from_secs(1) {
+                        self.save(&data).await?;
+                        saved = Instant::now();
+                    }
+                }
+                output.sync_all().await?;
+                if received != end - begin + 1 {
+                    return Err("Incomplete segment; retry to resume".into());
+                }
+                Ok(true)
+            }
+        });
+        // Wait for every worker before returning, including on errors or fallback.
+        let results = futures_util::future::join_all(futures).await;
+        let mut supported = true;
+        for result in results {
+            supported &= result?;
+        }
+        if self.data.lock().await.jobs[id].status != "downloading" {
+            return Ok(true);
+        }
+        if !supported {
+            return Ok(false);
+        }
+        let partial = self.root.join(format!("{}.part", original.name));
+        let mut output = tokio::fs::File::create(&partial).await?;
+        for part in 0..count {
+            let mut input =
+                tokio::fs::File::open(self.root.join(format!("{id}.segment-{part}"))).await?;
+            tokio::io::copy(&mut input, &mut output).await?;
+        }
+        output.sync_all().await?;
+        drop(output);
+        let mut data = self.data.lock().await;
+        if data.jobs[id].status != "downloading" {
+            return Ok(true);
+        }
+        tokio::fs::hard_link(&partial, self.root.join(&original.name)).await?;
+        tokio::fs::remove_file(partial).await?;
+        data.jobs.get_mut(id).unwrap().status = "completed".into();
+        for part in 0..count {
+            let _ = tokio::fs::remove_file(self.root.join(format!("{id}.segment-{part}"))).await;
+        }
+        Ok(true)
+    }
+    async fn sequential(&self, id: &str) -> Result<(), Error> {
+        self.data.lock().await.jobs.get_mut(id).unwrap().segments = 0;
         let job = self.data.lock().await.jobs[id].clone();
         let partial = self.root.join(format!("{}.part", job.name));
         let mut offset = tokio::fs::metadata(&partial)
@@ -109,19 +290,25 @@ impl App {
             }
         }
         let response = request.send().await?.error_for_status()?;
-        if response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+        let total = if response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
             let range = response
                 .headers()
                 .get("content-range")
                 .and_then(|h| h.to_str().ok())
                 .unwrap_or("");
-            if !range.starts_with(&format!("bytes {offset}-")) {
+            let total = range
+                .rsplit('/')
+                .next()
+                .and_then(|n| n.parse::<u64>().ok())
+                .ok_or("Invalid resume total")?;
+            if total == 0 || range != format!("bytes {offset}-{}/{total}", total - 1) {
                 return Err("Invalid resume range".into());
             }
+            Some(total)
         } else {
             offset = 0;
-        }
-        let total = response.content_length().map(|n| n + offset);
+            response.content_length()
+        };
         let validator = response
             .headers()
             .get("etag")
@@ -180,6 +367,9 @@ impl App {
         tokio::fs::hard_link(&partial, self.root.join(&job.name)).await?;
         tokio::fs::remove_file(partial).await?;
         job.status = "completed".into();
+        for part in 0..16 {
+            let _ = tokio::fs::remove_file(self.root.join(format!("{id}.segment-{part}"))).await;
+        }
         Ok(())
     }
 }
@@ -292,6 +482,7 @@ async fn add(State(app): State<Arc<App>>, headers: HeaderMap, Json(input): Json<
             speed: 0.,
             error: String::new(),
             validator: None,
+            segments: 0,
         },
     );
     if let Err(error) = app.save(&data).await {
@@ -346,6 +537,7 @@ async fn main() -> Result<(), Error> {
         .unwrap_or_else(|| home.join(".local/state"))
         .join("opendownload/queue.json");
     let mut port = 8765;
+    let mut connections: u8 = 4;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let value = args.next().ok_or("Expected argument value")?;
@@ -353,6 +545,12 @@ async fn main() -> Result<(), Error> {
             "--downloads" => root = value.into(),
             "--state" => state = value.into(),
             "--port" => port = value.parse()?,
+            "--connections" => {
+                connections = value.parse()?;
+                if !(1..=16).contains(&connections) {
+                    return Err("Connections must be 1 through 16".into());
+                }
+            }
             _ => return Err(format!("Unknown option: {arg}").into()),
         }
     }
@@ -379,10 +577,12 @@ async fn main() -> Result<(), Error> {
         root,
         state,
         port,
+        connections,
         token: uuid::Uuid::new_v4().to_string(),
         client: reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
-            .user_agent("OpenDownload/0.1")
+            .read_timeout(Duration::from_secs(30))
+            .user_agent("OpenDownload/0.2")
             .build()?,
     });
     let router = Router::new()

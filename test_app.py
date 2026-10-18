@@ -22,26 +22,54 @@ class Source(BaseHTTPRequestHandler):
         if self.path == '/missing':
             self.send_error(404)
             return
-        offset = int(self.headers.get('Range', 'bytes=0-')[6:-1]) if self.path != '/no-range' else 0
-        self.send_response(206 if offset else 200)
-        self.send_header('ETag', '"fixture-v1"')
-        self.send_header('Content-Length', str(len(PAYLOAD) - offset))
-        if offset:
-            self.send_header('Content-Range', f'bytes {offset}-{len(PAYLOAD)-1}/{len(PAYLOAD)}')
+        range_header = self.headers.get('Range')
+        with self.server.requests_lock:
+            self.server.requests.append((self.path, range_header, self.headers.get('If-Range')))
+        payload = PAYLOAD if not self.path.startswith('/versioned') else self.server.payload
+        etag = '"fixture-v1"' if payload == PAYLOAD else '"fixture-v2"'
+        bounded = range_header is not None and self.path != '/no-range'
+        if self.path == '/lying-range' and range_header != 'bytes=0-0':
+            bounded = False
+        if self.headers.get('If-Range') and self.headers['If-Range'] != etag:
+            bounded = False
+        offset, end = 0, len(payload) - 1
+        if bounded:
+            first, last = range_header[6:].split('-')
+            offset = int(first)
+            if last:
+                end = min(int(last), end)
+        self.send_response(206 if bounded else 200)
+        self.send_header('ETag', 'W/' + etag if self.path == '/weak' else etag)
+        self.send_header('Content-Length', str(end - offset + 1))
+        if bounded:
+            claimed_end = end - 1 if self.path == '/bad-range' and range_header != 'bytes=0-0' else end
+            self.send_header('Content-Range', f'bytes {offset}-{claimed_end}/{len(payload)}')
         self.end_headers()
+        with self.server.requests_lock:
+            self.server.active += 1
+            self.server.max_active = max(self.server.max_active, self.server.active)
         try:
-            for i in range(offset, len(PAYLOAD), 8192):
-                self.wfile.write(PAYLOAD[i:i+8192])
+            for i in range(offset, end + 1, 8192):
+                self.wfile.write(payload[i:min(i+8192, end+1)])
                 self.wfile.flush()
-                time.sleep(.002)
+                time.sleep(.005)
         except (BrokenPipeError, ConnectionResetError):
             pass
+        finally:
+            with self.server.requests_lock:
+                self.server.active -= 1
+
 
 
 class Downloads(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), Source)
+        cls.server.requests = []
+        cls.server.active = 0
+        cls.server.max_active = 0
+        cls.server.requests_lock = threading.Lock()
+        cls.server.payload = PAYLOAD
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
         cls.url = f'http://127.0.0.1:{cls.server.server_port}'
 
@@ -51,6 +79,10 @@ class Downloads(unittest.TestCase):
         cls.server.server_close()
 
     def setUp(self):
+        with self.server.requests_lock:
+            self.server.requests.clear()
+            self.server.max_active = 0
+        self.server.payload = PAYLOAD
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -97,13 +129,18 @@ class Downloads(unittest.TestCase):
         self.api('add', {'url': self.url + '/file'})
         self.wait_for(lambda: self.job()['downloaded'] > 0)
         self.api('pause', {'id': self.job()['id']})
-        self.wait_for(lambda: (self.root / 'files/file.part').stat().st_size > 0)
+        self.wait_for(lambda: len(list((self.root / 'files').glob('*.segment-*'))) == 4)
+        time.sleep(.05)
         self.stop()
         self.start()
         self.assertEqual(self.job()['status'], 'paused')
         self.api('resume', {'id': self.job()['id']})
         self.wait_for(lambda: self.job()['status'] == 'completed')
         self.assertEqual((self.root / 'files/file').read_bytes(), PAYLOAD)
+        with self.server.requests_lock:
+            resumed = [r for path, r, validator in self.server.requests if path == '/file' and validator]
+        initial = {f'bytes={i*len(PAYLOAD)//4}-{(i+1)*len(PAYLOAD)//4-1}' for i in range(4)}
+        self.assertTrue(any(r not in initial for r in resumed), 'Expected resumed segment offsets')
 
     def test_server_ignores_range(self):
         self.api('add', {'url': self.url + '/no-range'})
@@ -113,6 +150,57 @@ class Downloads(unittest.TestCase):
         self.api('resume', {'id': self.job()['id']})
         self.wait_for(lambda: self.job()['status'] == 'completed')
         self.assertEqual((self.root / 'files/no-range').read_bytes(), PAYLOAD)
+
+    def test_parallel_ranges_and_integrity(self):
+        self.api('add', {'url': self.url + '/parallel'})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual(self.job()['segments'], 4)
+        self.assertEqual((self.root / 'files/parallel').read_bytes(), PAYLOAD)
+        with self.server.requests_lock:
+            ranges = [r for path, r, validator in self.server.requests if path == '/parallel' and validator]
+        expected = [f'bytes={i*len(PAYLOAD)//4}-{(i+1)*len(PAYLOAD)//4-1}' for i in range(4)]
+        self.assertCountEqual(ranges, expected)
+        self.assertGreaterEqual(self.server.max_active, 2)
+        self.assertEqual(list((self.root / 'files').glob('*.segment-*')), [])
+
+    def test_range_rejection_falls_back(self):
+        self.api('add', {'url': self.url + '/lying-range'})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual((self.root / 'files/lying-range').read_bytes(), PAYLOAD)
+        self.assertEqual(self.job()['segments'], 0)
+
+    def test_invalid_range_falls_back(self):
+        self.api('add', {'url': self.url + '/bad-range'})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual((self.root / 'files/bad-range').read_bytes(), PAYLOAD)
+        self.assertEqual(self.job()['segments'], 0)
+
+    def test_weak_validator_uses_single_stream(self):
+        self.api('add', {'url': self.url + '/weak'})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual(self.job()['segments'], 0)
+        self.assertEqual((self.root / 'files/weak').read_bytes(), PAYLOAD)
+
+    def test_changed_file_restarts_all_segments(self):
+        self.api('add', {'url': self.url + '/versioned'})
+        self.wait_for(lambda: self.job()['downloaded'] > 65536)
+        self.api('pause', {'id': self.job()['id']})
+        time.sleep(.1)
+        self.stop()
+        self.server.payload = bytes(reversed(PAYLOAD))
+        self.start()
+        self.api('resume', {'id': self.job()['id']})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual((self.root / 'files/versioned').read_bytes(), self.server.payload)
+
+    def test_single_connection_option(self):
+        self.stop()
+        self.command += ['--connections', '1']
+        self.start()
+        self.api('add', {'url': self.url + '/single'})
+        self.wait_for(lambda: self.job()['status'] == 'completed')
+        self.assertEqual(self.job()['segments'], 0)
+        self.assertEqual((self.root / 'files/single').read_bytes(), PAYLOAD)
 
     def test_existing_file_is_preserved(self):
         files = self.root / 'files'

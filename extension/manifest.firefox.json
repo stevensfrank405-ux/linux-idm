@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "OpenDownload Companion",
+  "version": "0.2.0",
+  "description": "Send links, images, media, and optional browser downloads to your local OpenDownload app.",
+  "permissions": ["storage", "contextMenus", "activeTab", "scripting", "downloads"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": {"scripts": ["background.js"]},
+  "action": {"default_popup": "popup.html", "default_title": "OpenDownload"},
+  "browser_specific_settings": {"gecko": {"id": "opendownload@opendownload.local", "strict_min_version": "128.0", "data_collection_permissions": {"required": ["none"]}}}
+}
